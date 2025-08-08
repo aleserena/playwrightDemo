@@ -1,0 +1,173 @@
+---
+  name: Playwright Tests
+  on:
+    workflow_dispatch:
+      inputs:
+        grep:
+          description: grep, tags that will run
+            [empty=all|@SecretSauce|@login|@inventory|@setup|@Desktop]
+          required: false
+        grepInvert:
+          description: grep invert, tags that will not run
+            [empty=all|@SecretSauce|@login|@inventory|@setup|@Desktop]
+          required: false
+          default: "@setup"
+        project:
+          description: project, browsers to use [*=all|chromium|webkit|Mobile
+            Chrome|Mobile Safari]
+          required: true
+          default: "*"
+  run-name: Testing ${{ github.event.inputs.grep }}, ${{ github.event.inputs.project }}
+  jobs:
+    install:
+      timeout-minutes: 60
+      name: Install
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4.2.2
+        - uses: actions/setup-node@v4.4.0
+        - name: Cache node_modules
+          uses: actions/cache@v4.2.4
+          id: cache-node-modules
+          with:
+            path: |
+              node_modules
+            key: modules-${{ hashFiles('package-lock.json') }}
+        - name: Cache Playwright binaries
+          uses: actions/cache@v4.2.4
+          id: cache-playwright
+          with:
+            path: |
+              ~/.cache/ms-playwright
+            key: playwright-${{ hashFiles('package-lock.json') }}
+        - name: Install dependencies
+          if: steps.cache-node-modules.outputs.cache-hit != 'true'
+          run: npm ci
+        - name: Install Playwright Browsers
+          if: steps.cache-playwright.outputs.cache-hit != 'true'
+          run: npx playwright install --with-deps
+    test-setup:
+      timeout-minutes: 60
+      runs-on: ubuntu-latest
+      needs: install
+      steps:
+        - uses: actions/checkout@v4.2.2
+        - uses: actions/setup-node@v4.4.0
+          with:
+            node-version: 22
+        - name: Cache node_modules
+          uses: actions/cache@v4.2.4
+          with:
+            path: |
+              node_modules
+            key: modules-${{ hashFiles('package-lock.json') }}
+        - name: Cache Playwright
+          uses: actions/cache@v4.2.4
+          with:
+            path: |
+              ~/.cache/ms-playwright
+            key: playwright-${{ hashFiles('package-lock.json') }}
+        - name: Cache Auth
+          uses: actions/cache@v4.2.4
+          id: cache-auth
+          with:
+            path: |
+              .auth
+            key: auth-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+        - name: Run Playwright tests
+          env:
+            PASSWORD: ${{ secrets.PASSWORD }}
+          run: npx playwright test --grep="(?=.*@Setup)(?=.*@SauceDemo)"
+            --project="chromium"
+    test:
+      timeout-minutes: 60
+      runs-on: ubuntu-latest
+      needs: test-setup
+      strategy:
+        fail-fast: false
+        matrix:
+          shardIndex:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+          shardTotal:
+            - 6
+      steps:
+        - uses: actions/checkout@v4.2.2
+        - uses: actions/setup-node@v4.4.0
+          with:
+            node-version: 22
+        - name: Cache node_modules
+          uses: actions/cache@v4.2.4
+          with:
+            path: |
+              node_modules
+            key: modules-${{ hashFiles('package-lock.json') }}
+        - name: Cache Auth
+          uses: actions/cache@v4.2.4
+          with:
+            path: |
+              .auth
+            key: auth-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+        - name: Cache Playwright
+          uses: actions/cache@v4.2.4
+          with:
+            path: |
+              ~/.cache/ms-playwright
+            key: playwright-${{ hashFiles('package-lock.json') }}
+        - name: Run Playwright tests
+          env:
+            PASSWORD: ${{ secrets.PASSWORD }}
+          run: npx playwright test --grep="${{ github.event.inputs.grep }}"
+            --grep-invert="${{ github.event.inputs.grepInvert }}" --project="${{
+            github.event.inputs.project }}"  --shard=${{ matrix.shardIndex }}/${{
+            matrix.shardTotal }}
+        - name: Upload blob report to GitHub Actions Artifacts
+          if: ${{ !cancelled() }}
+          uses: actions/upload-artifact@v4
+          with:
+            name: blob-report-${{ matrix.shardIndex }}
+            path: blob-report
+            retention-days: 1
+    merge-reports:
+      if: ${{ !cancelled() }}
+      needs:
+        - test
+      runs-on: ubuntu-latest
+      outputs:
+        timestamp: ${{ steps.timestampid.outputs.timestamp }}
+      steps:
+        - name: Set a timestamp
+          id: timestampid
+          run: echo "timestamp=$(date --utc +%Y%m%d_%H%M%SZ)" >> "$GITHUB_OUTPUT" 
+        - uses: actions/checkout@v4.2.2
+        - uses: actions/setup-node@v4.4.0
+          with:
+            node-version: 22
+        - name: Install dependencies
+          run: npm ci
+        - name: Download blob reports from GitHub Actions Artifacts
+          uses: actions/download-artifact@v4
+          with:
+            path: all-blob-reports
+            pattern: blob-report-*
+            merge-multiple: true
+        - name: Merge into HTML Report
+          run: npx playwright merge-reports --reporter=html ./all-blob-reports
+        - name: Upload HTML report
+          uses: actions/upload-artifact@v4
+          with:
+            name: html-report--attempt-${{ github.run_attempt }}
+            path: playwright-report
+            retention-days: 14
+        - name: Push the new files to github pages
+          uses: peaceiris/actions-gh-pages@v4
+          with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            publish_dir: ./playwright-report
+            destination_dir: ${{ steps.timestampid.outputs.timestamp }}
+        - name: Write URL in summary
+          run: echo "### Test results (link available after 20 secs) - https://${{ github.repository_owner }}.github.io/playwright-test-results/${{ steps.timestampid.outputs.timestamp }}/" >> $GITHUB_STEP_SUMMARY
