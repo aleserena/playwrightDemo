@@ -47,12 +47,7 @@ export default defineConfig({
     },
     {
       name: "Mobile Chrome",
-      use: { ...devices["Galaxy S9+"] },
-      grep: /@Mobile/,
-    },
-    {
-      name: "Mobile Safari",
-      use: { ...devices["iPhone 14"] },
+      use: { ...devices["Galaxy S24"] },
       grep: /@Mobile/,
     },
   ],
