@@ -1,5 +1,6 @@
-import { defineConfig, globalIgnores } from "eslint/config";
+// eslint.config.js
 import js from "@eslint/js";
+import { defineConfig, globalIgnores } from "eslint/config";
 import eslintPluginPrettierRecommended from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 
@@ -16,4 +17,11 @@ export default defineConfig([
   },
   js.configs.recommended,
   eslintPluginPrettierRecommended,
+  {
+    rules: {
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      indent: ["error", 2],
+      "no-console": ["warn", { allow: ["warn", "error"] }],
+    },
+  },
 ]);
